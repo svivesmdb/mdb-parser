@@ -288,36 +288,37 @@ if __name__== "__main__":
     output_database_name = params.db
     output_collection_name = params.collection
 
+    # Connect to which MongoDB instance?
     connectionStr = ''
-
     if params.uri:
-       connectionStr = params.uri # "mongodb://localhost:27017"
+        connectionStr = params.uri # "mongodb://localhost:27017"
     elif params.host and params.port:
         connectionStr = "mongodb://%s:%s" % (params.host, params.port)
     
     if not path.exists('./output'):
         mkdir("./output")
 
-    if True:
-        client = MongoClient()
-        db = client[output_database_name]
+    client = MongoClient(connectionStr)
+    db = client[output_database_name]
 
-        stats_collection = db[output_collection_name + "-raw-statistics"]
-        stats_collection.delete_many({})
+    stats_collection = db[output_collection_name + "-raw-statistics"]
+    stats_collection.delete_many({})
 
-        status_collection = db[output_collection_name + "-raw-status"]
-        status_collection.delete_many({})
+    status_collection = db[output_collection_name + "-raw-status"]
+    status_collection.delete_many({})
 
-        results_col = db[output_collection_name + "-sizing-results"]
-        results_col.delete_many({})
+    results_col = db[output_collection_name + "-sizing-results"]
+    results_col.delete_many({})
 
-        status_results_col = db[output_collection_name + "-status-results"]
-        status_results_col.delete_many({})
+    status_results_col = db[output_collection_name + "-status-results"]
+    status_results_col.delete_many({})
 
-    if params:
+    if params.source:
         mypath = params.source
         onlyfiles = [f for f in listdir(mypath) if path.isfile(path.join(mypath, f))]
                     
         for f in onlyfiles:
             if f.endswith('.' + params.extension): 
                 processFile(path.join(mypath, f), f, stats_collection, status_collection)
+    elif params.file:
+        processFile(params.file, params.file, stats_collection, status_collection)
