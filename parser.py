@@ -2,6 +2,7 @@ import re
 import json
 from pymongo import MongoClient
 from pymongo.errors import BulkWriteError
+from bson import BSON
 
 # To not bloat the code I've separated the pipelines somewhere else
 import sizingpipelines
@@ -12,6 +13,12 @@ Each file that will be processed is the output of only one server' instance.
 There are two types of files that can be processed, serverstatus and db status.
 """
 
+def readDiagnosticsData():
+    import bson
+    import zlib
+    from bson.codec_options import CodecOptions
+    mypath = "./diagnosticsdatasample/"
+    onlyfiles = [f for f in listdir(mypath) if path.isfile(path.join(mypath, f))]
 
 def stripUnwantedCharacters(block):
     """
@@ -251,7 +258,8 @@ def processFile(infile, fname, stats_collection, status_collection):
         process_object_dict = json.loads(output)
         # Mark the origin of the calculations
         process_object_dict['sourcefile'] = fname
-        source_collection.insert_one(process_object_dict)
+        if source_collection:
+            source_collection.insert_one(process_object_dict)
 
     # Add the matching needed to make sure we run the pipeline only for the current file.    
     pipeline_to_execute.insert(0, {"$match":{"sourcefile":fname}})
@@ -260,9 +268,10 @@ def processFile(infile, fname, stats_collection, status_collection):
 
     # Run the aggregation pipeline on the results
     if len(process_output) > 0:
-        pipeline_results = list(source_collection.aggregate(pipeline_to_execute))[0]
-        del pipeline_results['_id']
-        target_collection.insert_one(pipeline_results)
+        if source_collection:
+            pipeline_results = list(source_collection.aggregate(pipeline_to_execute))[0]
+            del pipeline_results['_id']
+            target_collection.insert_one(pipeline_results)
 
 
 if __name__== "__main__":
@@ -298,27 +307,42 @@ if __name__== "__main__":
     if not path.exists('./output'):
         mkdir("./output")
 
-    client = MongoClient(connectionStr)
-    db = client[output_database_name]
+    status_results_col = results_col = stats_collection = status_collection = None
+    
+    if connectionStr != '':
+        client = MongoClient(connectionStr)
+        db = client[output_database_name]
+        some_col = db[output_collection_name + "-sample"]
 
-    stats_collection = db[output_collection_name + "-raw-statistics"]
-    stats_collection.delete_many({})
+        client = MongoClient(connectionStr)
+        db = client[output_database_name]
 
-    status_collection = db[output_collection_name + "-raw-status"]
-    status_collection.delete_many({})
+        stats_collection = db[output_collection_name + "-raw-statistics"]
+        stats_collection.delete_many({})
 
-    results_col = db[output_collection_name + "-sizing-results"]
-    results_col.delete_many({})
+        status_collection = db[output_collection_name + "-raw-status"]
+        status_collection.delete_many({})
 
-    status_results_col = db[output_collection_name + "-status-results"]
-    status_results_col.delete_many({})
+        results_col = db[output_collection_name + "-sizing-results"]
+        results_col.delete_many({})
+
+        status_results_col = db[output_collection_name + "-status-results"]
+        status_results_col.delete_many({})
 
     if params.source:
         mypath = params.source
         onlyfiles = [f for f in listdir(mypath) if path.isfile(path.join(mypath, f))]
-                    
+        i = 0
         for f in onlyfiles:
+            
             if f.endswith('.' + params.extension): 
+                i+=1
                 processFile(path.join(mypath, f), f, stats_collection, status_collection)
+        
+        print("Done processing " + str(i) + " files")
+
     elif params.file:
         processFile(params.file, params.file, stats_collection, status_collection)
+        print("Done!")
+
+    

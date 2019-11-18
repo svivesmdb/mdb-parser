@@ -1,54 +1,67 @@
-pipeline = [{'$match': {
-    'collections': {
-        "$exists": 1
+pipeline = [
+    {
+        '$match': {
+            'collections': {
+                '$exists': 1
+            }
+        }
+    }, {
+        '$group': {
+            '_id': '$sourcefile', 
+            'data_size_without_compression_GB': {
+                '$sum': {
+                    '$divide': [
+                        '$dataSize', 1073741824
+                    ]
+                }
+            }, 
+            'index_size_GB': {
+                '$sum': {
+                    '$divide': [
+                        '$indexSize', 1073741824
+                    ]
+                }
+            }, 
+            'index_size_GB': {
+                '$sum': {
+                    '$divide': [
+                        '$indexSize', 1073741824
+                    ]
+                }
+            }, 
+            'storage_size_compressed_GB': {
+                '$sum': {
+                    '$divide': [
+                        '$storageSize', 1073741824
+                    ]
+                }
+            },
+            'total_objects': {
+                '$sum': '$objects'
+            }, 
+            'total_objects_in_Millions': {
+                '$sum': {
+                    '$divide': [
+                        '$objects', 1000000
+                    ]
+                }
+            }, 
+            'total_indices': {
+                '$sum': '$indexes'
+            }, 
+            'total_collections': {
+                '$sum': '$collections'
+            }, 
+            'collections': {
+                '$push': {
+                    'collections': '$collections', 
+                    'numIndices': '$indexes', 
+                    'database': '$db'
+                }
+            }
+        }
     }
-    }}, {
-    "$group": {
-    "_id": '$ns',
-    "DataSize_no_compression": {
-        "$sum": {
-        "$divide": [
-            '$dataSize',
-            1073741824
-        ]
-        }
-    },
-    "indexSize_GB": {
-        "$sum": {
-        "$divide": [
-            '$indexSize',
-            1073741824
-        ]
-        }
-    },
-    'StorageSize_compressed_GB': {
-        '$sum': {
-        '$divide': [
-            '$storageSize',
-            1073741824
-        ]
-        }
-    },
-    'objects': {
-        '$sum': '$objects'
-    },
-    'objects_in_Millions': {
-        "$sum": {
-        "$divide": [
-            '$objects',
-            1000000
-        ]
-        }
-    },
-    'collections': {
-        '$push': {
-        'collections': '$collections',
-        'numIndices': '$indexes',
-        'database': '$db'
-        }
-    }
-}}]
-
+]
 status_pipeline = [{
     "$project": {
     "network_Out_GB":{
@@ -99,3 +112,6 @@ status_pipeline = [{
     },
     "replicationStats":"$replicationStats"
 }}]
+
+
+
