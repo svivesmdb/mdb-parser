@@ -43,25 +43,20 @@ def replaceExtendedJsonTypestoBasicJson(block):
     This function will reemplace extended JSON types such as NumberDecimal, NumberLong etc. 
     stripping them and converting them into plain JSON (no types, string types or integer).
     """
-    if block.find('NumberDecimal') > 0:
-        block = re.sub(r'NumberDecimal\(\"([0-9\.]+)+\"\)', r'\1', block)
-        block = re.sub(r'NumberDecimal\(([0-9.]+)+\)', r'\1', block)
 
-    if block.find('NumberLong') > 0:
-        block = re.sub(r'NumberLong\(\"([0-9\.]+)+\"\)', r'\1', block)
-        block = re.sub(r'NumberLong\(([0-9.]+)+\)', r'\1', block)
+    # @TODO ADD MORE TYPES HERE
+    keywords = ['BinData','NumberLong','ObjectId','Decimal128']
+
+    for k in keywords:
+        if block.find(k) > 0:
+            block = re.sub(r'' + k + r'\(\"([0-9\.]+)+\"\)', r'\1', block)
+            block = re.sub(r'' + k + r'\(([0-9.]+)+\)', r'\1', block)
 
     if block.find('ISODate') > 0:
-        block = re.sub(r'ISODate\(\"([0-9TZ.:\-])+\"\)', r'"\1"', block)        
-
-    if block.find('BinData') > 0:
-        block = re.sub(r'BinData\(([0-9])+,\"(.)+\"\)', r'"\2"', block)  
+        block = re.sub(r'ISODate\(\"([0-9TZ.:\-])+\"\)', r'"\1"', block)
 
     if block.find('Timestamp') > 0:
-        block = re.sub(r'Timestamp\(([0-9])+, ([0-9])+\)', r'"\1"', block)       
-
-    if block.find('ObjectId') > 0:
-        block = re.sub(r'ObjectId\(\"([0-9a-z])+\"\)', r'"\1"', block)       
+        block = re.sub(r'Timestamp\(([0-9])+, ([0-9])+\)', r'"\1"', block)   
 
     return block
 
@@ -69,7 +64,7 @@ def replaceExtendedJsonTypestoBasicJson(block):
 def replaceDotsOnJsonKeys(block):
     """
     Convert keys that are using 'something.1' to 'something_1'.
-    this will avoid problems
+    this will avoid problems on "normal" JSON
     """
     matches = re.findall(r"(\"[A-Za-z0-9\_\.]+\")+", block)
     
@@ -162,6 +157,7 @@ def processStatsFile(f, infile, fname, isServerStatusFile):
     out = []
     isindexdesc = False
     lastCollection = ''
+    lastDb = ''
 
     for line in f: 
 
@@ -214,18 +210,23 @@ def processStatsFile(f, infile, fname, isServerStatusFile):
                     if not isServerStatusFile and block_json and block_json.get('calculatedListOfindexes') != None:
                         block_json['forCollection'] = lastCollection
                         block = json.dumps(block_json)
+                    
+                    if block_json.get('db') != None:
+                        lastDb = block_json.get('db')
+                    else:
+                        block_json['belongsToDb'] = lastDb
 
                     if not isServerStatusFile and block_json and block_json.get('ns') != None:
                         lastCollection = block_json.get('ns')
                         
-                    out.append(block)
+                    out.append( json.dumps(block_json) )
                     block = ''
 
     fout.write("\n".join(out))
 
     return out
 
-def processFile(infile, fname, stats_collection, status_collection):
+def processFile(infile, fname, stats_collection, status_collection, restrictions):
     f = open(infile, "r")
     # Read all lines first to differentiate if it's a server status 
     # file or it's a sizing collections file.
@@ -261,17 +262,44 @@ def processFile(infile, fname, stats_collection, status_collection):
         if source_collection:
             source_collection.insert_one(process_object_dict)
 
-    # Add the matching needed to make sure we run the pipeline only for the current file.    
-    pipeline_to_execute.insert(0, {"$match":{"sourcefile":fname}})
+
+    # If we need to restrict
+    match_stage_params = {}
+    if restrictions == None:
+        # Add the matching needed to make sure we run the pipeline only for the current file.    
+        match_stage_params = {"sourcefile":fname}
+
+    else:
+        match_stage_params = {"sourcefile":fname}
+        
+        # Only including the databases specified and none other
+        if 'onlyDb' in restrictions:
+            match_stage_params['db'] = restrictions['onlyDb'] 
+            #match_stage_params['belongsToDb'] = restrictions['onlyDb']
+
+        # Excluding specific collections
+        if 'excludeCollection' in restrictions:
+            match_stage_params['ns'] = {"$nin": restrictions['excludeCollection']} 
+        
+        # Excluding specific databases
+        if 'excludeDb' in restrictions:
+            match_stage_params['db'] = {"$nin": restrictions['excludeDb']}
+            match_stage_params['belongsToDb'] = {"$nin": restrictions['excludeDb']}
+
+    
+    pipeline_to_execute.insert(0, {"$match":match_stage_params})
+
     # Include where the data comes from on the pipeline
     pipeline_to_execute.append({"$addFields":{"sourceFile":fname}})
 
     # Run the aggregation pipeline on the results
     if len(process_output) > 0:
         if source_collection:
-            pipeline_results = list(source_collection.aggregate(pipeline_to_execute))[0]
-            del pipeline_results['_id']
-            target_collection.insert_one(pipeline_results)
+            result = list(source_collection.aggregate(pipeline_to_execute))
+            if len(result) > 0:
+                pipeline_results = result[0]
+                del pipeline_results['_id']
+                target_collection.insert_one(pipeline_results)
 
 
 if __name__== "__main__":
@@ -287,11 +315,15 @@ if __name__== "__main__":
     
     #parser.add_argument('-e', help='Extension')
     parser.add_argument('--collection', help='Destination collection name', required=True)
-    parser.add_argument('--db',  help='Destination database name', required=True)
+    parser.add_argument('--db',  help='Destination database name', default="mdb_sa_sizings")
     parser.add_argument('--host', help='Host of the MongoDB server')
     parser.add_argument('--port', help='Port of the MongoDB server')
     parser.add_argument('--uri', help='Complete string for the destination MongoDB server')
     parser.add_argument('--extension', help='File extension',default="txt")
+    
+    parser.add_argument('--onlyDb',  help='Only calculate the stats for one single database')
+    parser.add_argument('--excludeDb',  help='Ignore specific databases when calculating the stats', action='append')
+    parser.add_argument('--excludeCollection',  help='Ignore scpecific collections when calculating the stats',action='append')
 
     params = parser.parse_args()
     output_database_name = params.db
@@ -311,10 +343,7 @@ if __name__== "__main__":
     
     if connectionStr != '':
         client = MongoClient(connectionStr)
-        db = client[output_database_name]
-        some_col = db[output_collection_name + "-sample"]
-
-        client = MongoClient(connectionStr)
+        
         db = client[output_database_name]
 
         stats_collection = db[output_collection_name + "-raw-statistics"]
@@ -323,26 +352,38 @@ if __name__== "__main__":
         status_collection = db[output_collection_name + "-raw-status"]
         status_collection.delete_many({})
 
-        results_col = db[output_collection_name + "-sizing-results"]
+        results_col = db[output_collection_name + "-statistics-results"]
         results_col.delete_many({})
 
         status_results_col = db[output_collection_name + "-status-results"]
         status_results_col.delete_many({})
 
+    # Check if we are excluding any databases or collections on the calculations
+    restrictions = None
+    if params.excludeDb or params.excludeCollection or params.onlyDb:
+        restrictions = {}
+        if params.excludeDb: restrictions['excludeDb'] = params.excludeDb
+        if params.excludeCollection: restrictions['excludeCollection'] = params.excludeCollections
+        if params.onlyDb: restrictions['onlyDb'] = params.onlyDb
+
     if params.source:
         mypath = params.source
         onlyfiles = [f for f in listdir(mypath) if path.isfile(path.join(mypath, f))]
         i = 0
+                
         for f in onlyfiles:
-            
             if f.endswith('.' + params.extension): 
                 i+=1
-                processFile(path.join(mypath, f), f, stats_collection, status_collection)
+                processFile(path.join(mypath, f), f, stats_collection, status_collection, restrictions)
         
         print("Done processing " + str(i) + " files")
 
     elif params.file:
-        processFile(params.file, params.file, stats_collection, status_collection)
+        import os
+        import ntpath
+        fname = ntpath.basename(params.file)
+        fname = os.path.splitext(fname)[0]
+        processFile(params.file, fname, stats_collection, status_collection, restrictions)
         print("Done!")
 
     

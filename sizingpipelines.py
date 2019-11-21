@@ -52,16 +52,18 @@ pipeline = [
             'total_collections': {
                 '$sum': '$collections'
             }, 
-            'collections': {
+            'databases': {
                 '$push': {
+                    'database': '$db',
                     'collections': '$collections', 
-                    'numIndices': '$indexes', 
-                    'database': '$db'
+                    'numIndices': '$indexes'                    
                 }
             }
         }
     }
 ]
+
+
 status_pipeline = [{
     "$project": {
     "network_Out_GB":{
